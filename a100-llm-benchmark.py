@@ -20,6 +20,19 @@ def benchmark_transformer_layer(seq_length, batch_size, d_model):
     x = torch.randn(seq_length, batch_size, d_model, device='cuda')
     return time_operation(layer, x)
 
+class SimpleTransformerModel(nn.Module):
+    def __init__(self, d_model, nhead, num_layers):
+        super().__init__()
+        self.embedding = nn.Embedding(50000, d_model)
+        self.transformer = nn.Transformer(d_model, nhead, num_layers, num_layers, batch_first=True)
+        self.fc = nn.Linear(d_model, 50000)
+    
+    def forward(self, src, tgt):
+        src = self.embedding(src)
+        tgt = self.embedding(tgt)
+        output = self.transformer(src, tgt)
+        return self.fc(output)
+
 def benchmark_training_step(model, optimizer, criterion, src, tgt):
     def training_step():
         model.zero_grad()
@@ -31,29 +44,17 @@ def benchmark_training_step(model, optimizer, criterion, src, tgt):
         optimizer.step()
     return time_operation(training_step)
 
-def create_dummy_data(vocab_size, seq_length, batch_size, d_model):
+def create_dummy_data(vocab_size, seq_length, batch_size):
     src = torch.randint(0, vocab_size, (batch_size, seq_length), device='cuda')
     tgt = torch.randint(0, vocab_size, (batch_size, seq_length), device='cuda')
-    
-    # Create positional encodings
-    position = torch.arange(0, seq_length).unsqueeze(1).repeat(1, d_model)
-    div_term = torch.exp(torch.arange(0, d_model, 2) * (-torch.log(torch.tensor(10000.0)) / d_model))
-    pos_encoding = torch.zeros(seq_length, d_model)
-    pos_encoding[:, 0::2] = torch.sin(position[:, 0::2] * div_term)
-    pos_encoding[:, 1::2] = torch.cos(position[:, 1::2] * div_term)
-    
-    # Add positional encodings to src and tgt
-    src = src.unsqueeze(-1).repeat(1, 1, d_model).float() + pos_encoding.unsqueeze(0).repeat(batch_size, 1, 1).to('cuda')
-    tgt = tgt.unsqueeze(-1).repeat(1, 1, d_model).float() + pos_encoding.unsqueeze(0).repeat(batch_size, 1, 1).to('cuda')
-    
     return src, tgt
 
 def benchmark_llm_training(vocab_size, d_model, seq_length, batch_size, num_epochs):
-    model = nn.Transformer(d_model=d_model, nhead=8, num_encoder_layers=6, num_decoder_layers=6, batch_first=True).cuda()
+    model = SimpleTransformerModel(d_model, 8, 6).cuda()
     optimizer = optim.Adam(model.parameters())
     criterion = nn.CrossEntropyLoss()
     
-    src, tgt = create_dummy_data(vocab_size, seq_length, batch_size, d_model)
+    src, tgt = create_dummy_data(vocab_size, seq_length, batch_size)
     dataset = TensorDataset(src, tgt)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
