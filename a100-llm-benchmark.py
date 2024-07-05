@@ -23,15 +23,29 @@ def benchmark_transformer_layer(seq_length, batch_size, d_model):
 def benchmark_training_step(model, optimizer, criterion, src, tgt):
     def training_step():
         model.zero_grad()
-        output = model(src, tgt[:, :-1])
-        loss = criterion(output.reshape(-1, output.size(-1)), tgt[:, 1:].reshape(-1))
+        tgt_input = tgt[:, :-1]
+        tgt_output = tgt[:, 1:]
+        output = model(src, tgt_input)
+        loss = criterion(output.reshape(-1, output.size(-1)), tgt_output.reshape(-1))
         loss.backward()
         optimizer.step()
     return time_operation(training_step)
 
-def create_dummy_data(vocab_size, seq_length, batch_size):
+def create_dummy_data(vocab_size, seq_length, batch_size, d_model):
     src = torch.randint(0, vocab_size, (batch_size, seq_length), device='cuda')
     tgt = torch.randint(0, vocab_size, (batch_size, seq_length), device='cuda')
+    
+    # Create positional encodings
+    position = torch.arange(0, seq_length).unsqueeze(1).repeat(1, d_model)
+    div_term = torch.exp(torch.arange(0, d_model, 2) * (-torch.log(torch.tensor(10000.0)) / d_model))
+    pos_encoding = torch.zeros(seq_length, d_model)
+    pos_encoding[:, 0::2] = torch.sin(position[:, 0::2] * div_term)
+    pos_encoding[:, 1::2] = torch.cos(position[:, 1::2] * div_term)
+    
+    # Add positional encodings to src and tgt
+    src = src.unsqueeze(-1).repeat(1, 1, d_model).float() + pos_encoding.unsqueeze(0).repeat(batch_size, 1, 1).to('cuda')
+    tgt = tgt.unsqueeze(-1).repeat(1, 1, d_model).float() + pos_encoding.unsqueeze(0).repeat(batch_size, 1, 1).to('cuda')
+    
     return src, tgt
 
 def benchmark_llm_training(vocab_size, d_model, seq_length, batch_size, num_epochs):
@@ -39,7 +53,7 @@ def benchmark_llm_training(vocab_size, d_model, seq_length, batch_size, num_epoc
     optimizer = optim.Adam(model.parameters())
     criterion = nn.CrossEntropyLoss()
     
-    src, tgt = create_dummy_data(vocab_size, seq_length, batch_size)
+    src, tgt = create_dummy_data(vocab_size, seq_length, batch_size, d_model)
     dataset = TensorDataset(src, tgt)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
