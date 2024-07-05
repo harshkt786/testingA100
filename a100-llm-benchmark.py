@@ -20,33 +20,33 @@ def benchmark_transformer_layer(seq_length, batch_size, d_model):
     x = torch.randn(seq_length, batch_size, d_model, device='cuda')
     return time_operation(layer, x)
 
-def benchmark_training_step(model, optimizer, criterion, inputs, targets):
+def benchmark_training_step(model, optimizer, criterion, src, tgt):
     def training_step():
         model.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, targets)
+        output = model(src, tgt[:, :-1])
+        loss = criterion(output.reshape(-1, output.size(-1)), tgt[:, 1:].reshape(-1))
         loss.backward()
         optimizer.step()
     return time_operation(training_step)
 
 def create_dummy_data(vocab_size, seq_length, batch_size):
-    inputs = torch.randint(0, vocab_size, (batch_size, seq_length), device='cuda')
-    targets = torch.randint(0, vocab_size, (batch_size, seq_length), device='cuda')
-    return inputs, targets
+    src = torch.randint(0, vocab_size, (batch_size, seq_length), device='cuda')
+    tgt = torch.randint(0, vocab_size, (batch_size, seq_length), device='cuda')
+    return src, tgt
 
 def benchmark_llm_training(vocab_size, d_model, seq_length, batch_size, num_epochs):
-    model = nn.Transformer(d_model=d_model, nhead=8, num_encoder_layers=6, num_decoder_layers=6).cuda()
+    model = nn.Transformer(d_model=d_model, nhead=8, num_encoder_layers=6, num_decoder_layers=6, batch_first=True).cuda()
     optimizer = optim.Adam(model.parameters())
     criterion = nn.CrossEntropyLoss()
     
-    inputs, targets = create_dummy_data(vocab_size, seq_length, batch_size)
-    dataset = TensorDataset(inputs, targets)
+    src, tgt = create_dummy_data(vocab_size, seq_length, batch_size)
+    dataset = TensorDataset(src, tgt)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
     total_time = 0
     for epoch in range(num_epochs):
-        for batch_inputs, batch_targets in dataloader:
-            time_taken, _ = benchmark_training_step(model, optimizer, criterion, batch_inputs, batch_targets)
+        for batch_src, batch_tgt in dataloader:
+            time_taken, _ = benchmark_training_step(model, optimizer, criterion, batch_src, batch_tgt)
             total_time += time_taken
     return total_time / (num_epochs * len(dataloader))
 
